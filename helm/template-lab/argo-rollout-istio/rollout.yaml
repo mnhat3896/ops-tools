@@ -1,0 +1,75 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: rollouts-demo
+spec:
+  replicas: 1
+  analysis:
+    # limits the number of successful analysis runs and experiments to be stored in a history
+    # Defaults to 5.
+    successfulRunHistoryLimit: 1
+    # limits the number of unsuccessful analysis runs and experiments to be stored in a history. 
+    # Stages for unsuccessful: "Error", "Failed", "Inconclusive"
+    # Defaults to 5.
+    unsuccessfulRunHistoryLimit: 1
+  revisionHistoryLimit: 2
+  strategy:
+    canary:
+      canaryService: rollouts-demo-canary
+      stableService: rollouts-demo-stable
+      trafficRouting:
+        istio:
+          virtualServices:
+          - name: rollouts-demo-vs # At least one virtualService is required
+            routes:
+            - canary # At least one route is required
+
+          # # One or more virtualServices can be configured
+          # - name: rollouts-demo-vs  # required
+          #   routes:
+          #     - primary # optional if there is a single route in VirtualService, required otherwise
+          # - name: rollouts-demo-vs  # required
+          #   routes:
+          #     - secondary # optional if there is a single route in VirtualService, required otherwise
+      analysis:
+        templates:
+        # name of AnalysisTemplate
+        - templateName: success-rate
+        - templateName: job-success-rate
+        # When it begins (after the 30s pause)
+        startingStep: 2
+        args:
+        - name: service-name
+          # name of the canary service (used in prometheus to find the correct metrics)
+          value: rollouts-demo-canary.default.svc.cluster.local
+      steps:
+      - setWeight: 20
+      - pause: {duration: 2m}
+      - setWeight: 40
+      - pause: {duration: 2m}
+      - setWeight: 60
+      - pause: {duration: 2m}
+      - setWeight: 80
+      - pause: {duration: 2m}
+      # At the end if no more step is present, 
+      # Argo will send 100% of the traffic to the canary release.
+  selector:
+    matchLabels:
+      app: rollouts-demo
+  template:
+    metadata:
+      labels:
+        app: rollouts-demo
+        istio-injection: enabled
+    spec:
+      containers:
+      - name: rollouts-demo
+        image: httpd
+        ports:
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        resources:
+          requests:
+            memory: 32Mi
+            cpu: 5m

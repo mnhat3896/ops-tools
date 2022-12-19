@@ -1,0 +1,49 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+spec:
+  args:
+  - name: service-name
+  metrics:
+  - name: success-rate
+    interval: 1m
+    successCondition: len(result) == 0 || result[0] >= 0.95
+    # failureCondition: len(result) != 0 || result[0] >= 1
+    failureLimit: 1
+    provider:
+      prometheus:
+        address: http://prometheus-server.default.svc.cluster.local:80
+        query: |
+          sum(irate(
+            istio_requests_total{reporter="source",destination_service=~"{{args.service-name}}",response_code!~"5.*"}[1m]
+          )) /
+          sum(irate(
+            istio_requests_total{reporter="source",destination_service=~"{{args.service-name}}"}[1m]
+          ))
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: job-success-rate
+spec:
+  args:
+  - name: service-name
+  metrics:      
+  - name: job
+    interval: 2m
+    failureLimit: 1
+    provider:
+      job:
+        spec:
+          backoffLimit: 1
+          template:
+            metadata:
+              labels:
+                sidecar.istio.io/inject: "false"
+            spec:
+              containers:
+              - name: job
+                image: yauritux/busybox-curl
+                command: ["/bin/sh", "-c", "if [ $(curl -s -o /dev/null -I -w '%{http_code}' http://{{args.service-name}}) -eq 200 ]; then exit 0; else exit 1; fi"]
+              restartPolicy: Never
